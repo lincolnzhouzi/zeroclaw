@@ -1,0 +1,51 @@
+[package]
+name = "mobile-claw"
+version = "0.1.0"
+edition = "2021"
+description = "Mobile AI Agent Gateway - Mobile Claw"
+license = "Apache-2.0 OR MIT"
+authors = ["ZeroClaw Team"]
+readme = "README.md"
+keywords = ["ai", "agent", "mobile", "iot", "smart-home"]
+categories = ["science::robotics", "embedded", "api-bindings"]
+
+[dependencies]
+zeroclaw = { path = "../.." }
+async-trait = "0.1"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+thiserror = "2"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+tracing = "0.1"
+futures-util = "0.3"
+pin-project-lite = "0.2"
+num_cpus = "1"
+rand = "0.8"
+toml = "0.8"
+
+reqwest = { version = "0.12", features = ["json", "stream"], optional = true }
+btleplug = { version = "0.11", optional = true }
+mdns-sd = { version = "0.13", optional = true }
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+ndk-context = "0.1"
+
+[target.'cfg(target_os = "ios")'.dependencies]
+core-foundation = "0.9"
+
+[features]
+default = ["wifi", "ble"]
+wifi = ["reqwest", "mdns-sd"]
+ble = ["btleplug"]
+mnn = []
+android = []
+ios = []
+
+[dev-dependencies]
+tokio-test = "0.4"
+mockall = "0.13"
+tempfile = "3"
