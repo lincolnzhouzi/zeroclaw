@@ -1,7 +1,9 @@
-pub mod config;
 pub mod builder;
+pub mod config;
 
 pub use builder::MobileClawRuntimeBuilder;
+
+use serde::{Deserialize, Serialize};
 
 use crate::device::DeviceManager;
 use crate::engine::LocalModelEngine;
@@ -64,7 +66,10 @@ impl MobileClawRuntime {
             let engine_config: crate::types::ModelConfig = model_config.clone().into();
             let engine = LocalModelEngine::new(engine_config).await?;
             *local_model = Some(engine);
-            tracing::info!("Local model engine initialized: {}", model_config.model_name);
+            tracing::info!(
+                "Local model engine initialized: {}",
+                model_config.model_name
+            );
         }
 
         *running = true;
@@ -251,4 +256,250 @@ impl MobileClawRuntime {
             .await
             .ok_or_else(|| Error::DeviceNotFound(device_id.to_string()))
     }
+
+    pub async fn connect_device(&self, device_id: &str) -> Result<()> {
+        let device_manager = self.device_manager.read().await;
+        let device = device_manager
+            .get_device(device_id)
+            .await
+            .ok_or_else(|| Error::DeviceNotFound(device_id.to_string()))?;
+
+        match device.protocol {
+            crate::types::ConnectionProtocol::HTTP
+            | crate::types::ConnectionProtocol::WebSocket => {
+                let wifi = self.wifi_manager.read().await;
+                if let Some(ref manager) = *wifi {
+                    manager.connect(&device.endpoint, None).await?;
+                }
+            }
+            crate::types::ConnectionProtocol::BLE => {
+                let ble = self.ble_manager.read().await;
+                if let Some(ref manager) = *ble {
+                    manager.connect(&device.endpoint).await?;
+                }
+            }
+            _ => {}
+        }
+
+        let dm = self.device_manager.write().await;
+        dm.connect(device_id).await?;
+        Ok(())
+    }
+
+    pub async fn disconnect_device(&self, device_id: &str) -> Result<()> {
+        let device_manager = self.device_manager.read().await;
+        let device = device_manager
+            .get_device(device_id)
+            .await
+            .ok_or_else(|| Error::DeviceNotFound(device_id.to_string()))?;
+
+        match device.protocol {
+            crate::types::ConnectionProtocol::HTTP
+            | crate::types::ConnectionProtocol::WebSocket => {
+                let wifi = self.wifi_manager.read().await;
+                if let Some(ref manager) = *wifi {
+                    manager.disconnect().await?;
+                }
+            }
+            crate::types::ConnectionProtocol::BLE => {
+                let ble = self.ble_manager.read().await;
+                if let Some(ref manager) = *ble {
+                    manager.disconnect(&device.endpoint).await?;
+                }
+            }
+            _ => {}
+        }
+
+        let mut dm = self.device_manager.write().await;
+        dm.disconnect(device_id).await?;
+        Ok(())
+    }
+
+    pub async fn load_model(&mut self, config: crate::types::ModelConfig) -> Result<()> {
+        let engine = LocalModelEngine::new(config).await?;
+        let mut local_model = self.local_model.write().await;
+        *local_model = Some(engine);
+        Ok(())
+    }
+
+    pub async fn unload_model(&mut self) -> Result<()> {
+        let mut local_model = self.local_model.write().await;
+        if let Some(ref mut engine) = *local_model {
+            engine.unload().await;
+        }
+        *local_model = None;
+        Ok(())
+    }
+
+    pub async fn stream_generate(
+        &self,
+        prompt: &str,
+    ) -> Result<futures_util::stream::BoxStream<'static, Result<String>>> {
+        let model = self.local_model.read().await;
+        if let Some(ref engine) = *model {
+            engine.stream_generate(prompt).await
+        } else {
+            Err(Error::ModelError("No local model loaded".to_string()))
+        }
+    }
+
+    pub fn config(&self) -> &config::RuntimeConfig {
+        &self.config
+    }
+
+    pub async fn update_settings(&mut self, settings: AppSettings) -> Result<()> {
+        self.config.discovery.scan_interval_secs = settings.discovery_interval_secs;
+        self.config.discovery.enable_wifi = true;
+        self.config.discovery.enable_ble = true;
+        Ok(())
+    }
+
+    pub async fn get_model_status(&self) -> ModelStatus {
+        let model = self.local_model.read().await;
+        match &*model {
+            Some(engine) => ModelStatus {
+                loaded: engine.is_loaded().await,
+                name: engine.model_name().to_string(),
+                backend: format!("{:?}", engine.backend_type()),
+                quantization: format!("{:?}", engine.quantization()),
+            },
+            None => ModelStatus {
+                loaded: false,
+                name: "None".to_string(),
+                backend: "None".to_string(),
+                quantization: "None".to_string(),
+            },
+        }
+    }
+
+    pub async fn get_available_models(&self) -> Vec<ModelInfo> {
+        vec![
+            ModelInfo {
+                id: "qwen-3b".to_string(),
+                name: "Qwen2.5-3B-Instruct".to_string(),
+                size_bytes: 1_800_000_000,
+                quantization: crate::types::MNNQuantization::INT8,
+                context_length: 4096,
+                downloaded: false,
+            },
+            ModelInfo {
+                id: "qwen-7b".to_string(),
+                name: "Qwen2.5-7B-Instruct".to_string(),
+                size_bytes: 4_200_000_000,
+                quantization: crate::types::MNNQuantization::INT8,
+                context_length: 8192,
+                downloaded: false,
+            },
+        ]
+    }
+
+    pub async fn get_user_profile(&self, user_id: &str) -> Result<UserProfileInfo> {
+        let profile = self.user_profile.read().await;
+        let user_profile = profile
+            .get_profile(user_id)
+            .await
+            .ok_or_else(|| Error::ProfileError(format!("User {} not found", user_id)))?;
+        let name = user_profile.user_id.clone();
+        Ok(UserProfileInfo {
+            user_id: user_profile.user_id,
+            name,
+            preferences: user_profile.preferences,
+            device_usage: user_profile.device_usage,
+            behavior_patterns: user_profile.behavior_patterns,
+        })
+    }
+
+    pub async fn update_user_preferences(
+        &mut self,
+        user_id: &str,
+        preferences: crate::types::UserPreferences,
+    ) -> Result<()> {
+        let profile = self.user_profile.write().await;
+        profile.update_preferences(user_id, preferences).await
+    }
+
+    pub async fn get_recommendations(&self, user_id: &str) -> Result<Vec<RecommendationInfo>> {
+        let devices = self.get_all_devices().await?;
+        let rec = self.recommendation.read().await;
+        let recommendations = rec.generate_recommendations(user_id, &devices).await?;
+        Ok(recommendations
+            .into_iter()
+            .map(|r| {
+                let action_type = format!("{:?}", r.recommendation_type);
+                let device_id = r.actions.first().map(|a| a.device_id.clone());
+                RecommendationInfo {
+                    id: r.id,
+                    title: r.title,
+                    description: r.description,
+                    action_type,
+                    device_id,
+                    confidence: r.confidence,
+                }
+            })
+            .collect())
+    }
+
+    pub async fn get_conversation_history(&self, _conversation_id: &str) -> Vec<ChatMessageInfo> {
+        let mcp = self.mcp_protocol.read().await;
+        mcp.get_history()
+    }
+
+    pub async fn clear_conversation(&mut self, _conversation_id: &str) -> Result<()> {
+        let mut mcp = self.mcp_protocol.write().await;
+        mcp.clear_history();
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelStatus {
+    pub loaded: bool,
+    pub name: String,
+    pub backend: String,
+    pub quantization: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelInfo {
+    pub id: String,
+    pub name: String,
+    pub size_bytes: u64,
+    pub quantization: crate::types::MNNQuantization,
+    pub context_length: usize,
+    pub downloaded: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserProfileInfo {
+    pub user_id: String,
+    pub name: String,
+    pub preferences: crate::types::UserPreferences,
+    pub device_usage: std::collections::HashMap<String, crate::profile::DeviceUsageStats>,
+    pub behavior_patterns: Vec<crate::profile::BehaviorPattern>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecommendationInfo {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    pub action_type: String,
+    pub device_id: Option<String>,
+    pub confidence: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatMessageInfo {
+    pub role: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppSettings {
+    pub theme: Option<String>,
+    pub language: Option<String>,
+    pub auto_discover: bool,
+    pub discovery_interval_secs: u64,
+    pub power_mode: crate::types::PowerMode,
+    pub notifications_enabled: bool,
 }

@@ -1,0 +1,35 @@
+[package]
+name = "mobile-claw-app"
+version = "0.1.0"
+description = "Mobile Claw - AI Agent Gateway"
+authors = ["ZeroClaw Team"]
+edition = "2021"
+
+[lib]
+name = "mobile_claw_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+futures-util = "0.3"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1"
+thiserror = "2"
+
+mobile-claw = { path = "../../crates/mobile-claw" }
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "z"
+strip = true

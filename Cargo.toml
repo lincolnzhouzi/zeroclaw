@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/robot-kit", "crates/mobile-claw"]
+members = [".", "crates/robot-kit", "crates/mobile-claw", "mobile-claw-app/src-tauri"]
 resolver = "2"
 
 [package]

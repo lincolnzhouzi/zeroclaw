@@ -1,6 +1,7 @@
 use crate::error::{Error, Result};
 use crate::protocols::mcp::MCPContext;
-use crate::types::{HardwareInfo, MNNBackendType, MNNQuantization, PowerMode, ModelConfig};
+use crate::types::{HardwareInfo, MNNBackendType, MNNQuantization, ModelConfig, PowerMode};
+use futures_util::stream::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -90,7 +91,18 @@ impl LocalModelEngine {
             }
 
             let words = vec![
-                "I", " understand", " your", " request", ".", " Let", " me", " help", " you", " with", " that", "."
+                "I",
+                " understand",
+                " your",
+                " request",
+                ".",
+                " Let",
+                " me",
+                " help",
+                " you",
+                " with",
+                " that",
+                ".",
             ];
 
             for word in words {
@@ -128,8 +140,7 @@ impl LocalModelEngine {
         if let Some(ref prefs) = context.user_preferences {
             prompt.push_str(&format!(
                 "User temperature preference: summer {:.1}C, winter {:.1}C\n\n",
-                prefs.temperature.preferred_summer,
-                prefs.temperature.preferred_winter
+                prefs.temperature.preferred_summer, prefs.temperature.preferred_winter
             ));
         }
 
@@ -142,7 +153,10 @@ impl LocalModelEngine {
 
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
-        Ok("I understand your request. How can I help you with your smart home devices?".to_string())
+        Ok(
+            "I understand your request. How can I help you with your smart home devices?"
+                .to_string(),
+        )
     }
 
     fn detect_hardware() -> HardwareInfo {
@@ -196,6 +210,18 @@ impl LocalModelEngine {
         &self.config
     }
 
+    pub fn model_name(&self) -> &str {
+        &self.config.model_name
+    }
+
+    pub fn backend_type(&self) -> MNNBackendType {
+        self.config.backend_type.clone()
+    }
+
+    pub fn quantization(&self) -> MNNQuantization {
+        self.config.quantization.clone()
+    }
+
     pub fn hardware_info(&self) -> &HardwareInfo {
         &self.hardware_info
     }
@@ -207,6 +233,25 @@ impl LocalModelEngine {
     pub fn context_cache(&self) -> &ContextCache {
         &self.context_cache
     }
+
+    pub async fn stream_generate(
+        &self,
+        prompt: &str,
+    ) -> Result<futures_util::stream::BoxStream<'static, Result<String>>> {
+        use futures_util::stream;
+
+        if !self.is_loaded().await {
+            return Err(Error::ModelError("Model not loaded".to_string()));
+        }
+
+        let response = format!("I understand: {}. How can I help you?", prompt);
+        let words: Vec<Result<String>> = response
+            .split_whitespace()
+            .map(|w| Ok(format!("{} ", w)))
+            .collect();
+
+        Ok(stream::iter(words).boxed())
+    }
 }
 
 pub struct Tokenizer {
@@ -217,9 +262,7 @@ impl Tokenizer {
     pub fn new(model_path: &PathBuf) -> Result<Self> {
         tracing::debug!("Loading tokenizer from {:?}", model_path);
 
-        Ok(Self {
-            vocab: Vec::new(),
-        })
+        Ok(Self { vocab: Vec::new() })
     }
 
     pub fn encode(&self, text: &str) -> Result<Vec<u32>> {
@@ -262,7 +305,10 @@ impl ContextCache {
 
     pub async fn get(&self, key: &str) -> Option<Vec<u32>> {
         let cache = self.cache.read().await;
-        cache.iter().find(|e| e.key == key).map(|e| e.tokens.clone())
+        cache
+            .iter()
+            .find(|e| e.key == key)
+            .map(|e| e.tokens.clone())
     }
 
     pub async fn put(&self, key: String, tokens: Vec<u32>) {

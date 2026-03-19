@@ -107,7 +107,11 @@ pub struct MemoryEntry {
 }
 
 impl MemoryEntry {
-    pub fn new(key: impl Into<String>, content: impl Into<String>, category: MemoryCategory) -> Self {
+    pub fn new(
+        key: impl Into<String>,
+        content: impl Into<String>,
+        category: MemoryCategory,
+    ) -> Self {
         Self {
             id: uuid::Uuid::new_v4().to_string(),
             key: key.into(),
@@ -159,7 +163,11 @@ impl MCPToolCall {
         }
     }
 
-    pub fn device_control(device_id: &str, action: &str, params: HashMap<String, serde_json::Value>) -> Self {
+    pub fn device_control(
+        device_id: &str,
+        action: &str,
+        params: HashMap<String, serde_json::Value>,
+    ) -> Self {
         Self::new(
             "device_control",
             serde_json::json!({
@@ -207,10 +215,17 @@ impl MCPProtocol {
     }
 
     pub async fn build_context(&self) -> MCPContext {
-        let conversation_id = self.current_conversation.read().await.clone()
+        let conversation_id = self
+            .current_conversation
+            .read()
+            .await
+            .clone()
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-        let memory = self.context_manager.get_relevant_memory(&conversation_id).await;
+        let memory = self
+            .context_manager
+            .get_relevant_memory(&conversation_id)
+            .await;
         let device_states = self.get_all_device_states().await;
 
         MCPContext {
@@ -248,7 +263,10 @@ impl MCPProtocol {
         self.tool_registry.list_tools()
     }
 
-    pub fn to_provider_messages(&self, mcp_messages: &[MCPMessage]) -> Vec<zeroclaw::providers::ChatMessage> {
+    pub fn to_provider_messages(
+        &self,
+        mcp_messages: &[MCPMessage],
+    ) -> Vec<zeroclaw::providers::ChatMessage> {
         mcp_messages
             .iter()
             .map(|m| zeroclaw::providers::ChatMessage {
@@ -281,7 +299,10 @@ impl MCPProtocol {
     async fn execute_device_control(&self, args: &serde_json::Value) -> serde_json::Value {
         let device_id = args.get("device_id").and_then(|v| v.as_str()).unwrap_or("");
         let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("");
-        let params = args.get("parameters").cloned().unwrap_or(serde_json::json!({}));
+        let params = args
+            .get("parameters")
+            .cloned()
+            .unwrap_or(serde_json::json!({}));
 
         serde_json::json!({
             "device_id": device_id,
@@ -290,6 +311,12 @@ impl MCPProtocol {
             "parameters": params
         })
     }
+
+    pub fn get_history(&self) -> Vec<crate::runtime::ChatMessageInfo> {
+        Vec::new()
+    }
+
+    pub fn clear_history(&mut self) {}
 }
 
 impl Default for MCPProtocol {
@@ -449,8 +476,11 @@ mod tests {
 
     #[test]
     fn mcp_context_builder() {
-        let context = MCPContext::new("conv-1")
-            .with_memory(vec![MemoryEntry::new("key1", "content1", MemoryCategory::Core)]);
+        let context = MCPContext::new("conv-1").with_memory(vec![MemoryEntry::new(
+            "key1",
+            "content1",
+            MemoryCategory::Core,
+        )]);
 
         assert_eq!(context.conversation_id, "conv-1");
         assert_eq!(context.memory.len(), 1);
@@ -466,7 +496,9 @@ mod tests {
     #[tokio::test]
     async fn store_and_recall_memory() {
         let protocol = MCPProtocol::new();
-        protocol.store_memory("pref_temp", "User prefers 24 degrees", MemoryCategory::Core).await;
+        protocol
+            .store_memory("pref_temp", "User prefers 24 degrees", MemoryCategory::Core)
+            .await;
 
         let results = protocol.recall_memory("temp", 10).await;
         assert_eq!(results.len(), 1);
