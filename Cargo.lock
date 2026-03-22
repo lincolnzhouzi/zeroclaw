@@ -4902,7 +4902,6 @@ dependencies = [
  "anyhow",
  "async-trait",
  "btleplug",
- "cc",
  "chrono",
  "core-foundation 0.9.4",
  "futures-util",

@@ -168,7 +168,7 @@ impl MNNInterpreterWrapper {
 
 impl Drop for MNNInterpreterWrapper {
     fn drop(&mut self) {
-        #[cfg(feature = "mnn")]
+        #[cfg(all(feature = "mnn", mnn_linked))]
         unsafe {
             if let Some(session) = self.session {
                 MNN_releaseSession(self.inner, session);
