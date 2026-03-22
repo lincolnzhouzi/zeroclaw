@@ -1,6 +1,9 @@
+use crate::engine::context::KVContextCache;
+use crate::engine::mnn::llm::{GenerationConfig, LlmConfig, MNNLlm};
+use crate::engine::mnn::{MNNForwardType, MNNInterpreterWrapper, Memory, Power, Precision};
 use crate::error::{Error, Result};
 use crate::protocols::mcp::MCPContext;
-use crate::types::{HardwareInfo, MNNBackendType, MNNQuantization, ModelConfig, PowerMode};
+use crate::types::{HardwareInfo, MNNBackendType, ModelConfig, PowerMode};
 use futures_util::stream::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -9,10 +12,12 @@ use tokio::sync::RwLock;
 
 pub struct LocalModelEngine {
     config: ModelConfig,
+    llm: Option<MNNLlm>,
     tokenizer: Tokenizer,
-    context_cache: ContextCache,
+    context_cache: KVContextCache,
     hardware_info: HardwareInfo,
     loaded: Arc<RwLock<bool>>,
+    generation_config: GenerationConfig,
 }
 
 impl LocalModelEngine {
@@ -28,23 +33,45 @@ impl LocalModelEngine {
         );
 
         let tokenizer = Tokenizer::new(&config.model_path)?;
-        let context_cache = ContextCache::new(100);
-        let loaded = Arc::new(RwLock::new(true));
+        let context_cache = KVContextCache::new(100);
+        let generation_config = GenerationConfig::default();
+        let loaded = Arc::new(RwLock::new(false));
 
         Ok(Self {
             config,
+            llm: None,
             tokenizer,
             context_cache,
             hardware_info,
             loaded,
+            generation_config,
         })
+    }
+
+    pub async fn load(&mut self) -> Result<()> {
+        if self.llm.is_some() {
+            return Ok(());
+        }
+
+        let llm = MNNLlm::new(&self.config.model_path);
+        llm.load().await?;
+
+        self.llm = Some(llm);
+        let mut loaded = self.loaded.write().await;
+        *loaded = true;
+
+        tracing::info!("MNN engine loaded successfully");
+        Ok(())
     }
 
     pub async fn is_loaded(&self) -> bool {
         *self.loaded.read().await
     }
 
-    pub async fn unload(&self) {
+    pub async fn unload(&mut self) {
+        if let Some(llm) = self.llm.take() {
+            llm.unload().await;
+        }
         let mut loaded = self.loaded.write().await;
         *loaded = false;
         tracing::info!("MNN engine unloaded");
@@ -85,33 +112,46 @@ impl LocalModelEngine {
         let full_prompt = self.build_prompt(prompt, context);
         let loaded = self.loaded.clone();
 
-        tokio::spawn(async move {
-            if !*loaded.read().await {
-                return;
-            }
+        if let Some(ref llm) = self.llm {
+            let llm_rx = llm.generate_stream(&full_prompt).await?;
 
-            let words = vec![
-                "I",
-                " understand",
-                " your",
-                " request",
-                ".",
-                " Let",
-                " me",
-                " help",
-                " you",
-                " with",
-                " that",
-                ".",
-            ];
-
-            for word in words {
-                if tx.send(word.to_string()).await.is_err() {
-                    break;
+            tokio::spawn(async move {
+                let mut llm_rx = llm_rx;
+                while let Some(chunk) = llm_rx.recv().await {
+                    if tx.send(chunk).await.is_err() {
+                        break;
+                    }
                 }
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-            }
-        });
+            });
+        } else {
+            tokio::spawn(async move {
+                if !*loaded.read().await {
+                    return;
+                }
+
+                let words = vec![
+                    "I",
+                    " understand",
+                    " your",
+                    " request",
+                    ".",
+                    " Let",
+                    " me",
+                    " help",
+                    " you",
+                    " with",
+                    " that",
+                    ".",
+                ];
+
+                for word in words {
+                    if tx.send(word.to_string()).await.is_err() {
+                        break;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                }
+            });
+        }
 
         Ok(rx)
     }
@@ -151,25 +191,36 @@ impl LocalModelEngine {
     async fn run_inference(&self, prompt: &str) -> Result<String> {
         tracing::debug!("Running inference on prompt ({} chars)", prompt.len());
 
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        if let Some(ref llm) = self.llm {
+            let mut rx = llm.generate_stream(prompt).await?;
+            let mut result = String::new();
 
-        Ok(
-            "I understand your request. How can I help you with your smart home devices?"
-                .to_string(),
-        )
+            while let Some(chunk) = rx.recv().await {
+                result.push_str(&chunk);
+            }
+
+            Ok(result)
+        } else {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+            Ok(
+                "I understand your request. How can I help you with your smart home devices?"
+                    .to_string(),
+            )
+        }
     }
 
     fn detect_hardware() -> HardwareInfo {
         HardwareInfo {
             cpu_cores: num_cpus::get(),
             total_memory: Self::get_total_memory(),
-            gpu_available: cfg!(feature = "mnn"),
-            gpu_type: None,
+            gpu_available: Self::detect_gpu(),
+            gpu_type: Self::detect_gpu_type(),
             gpu_memory: None,
-            npu_available: false,
-            npu_type: None,
+            npu_available: Self::detect_npu(),
+            npu_type: Self::detect_npu_type(),
             supports_fp16: Self::check_fp16_support(),
-            supports_dotprod: false,
+            supports_dotprod: Self::check_dotprod_support(),
         }
     }
 
@@ -177,7 +228,56 @@ impl LocalModelEngine {
         4 * 1024 * 1024 * 1024
     }
 
+    fn detect_gpu() -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            true
+        }
+        #[cfg(all(target_os = "windows", feature = "mnn-cuda"))]
+        {
+            true
+        }
+        #[cfg(not(any(target_os = "macos", all(target_os = "windows", feature = "mnn-cuda"))))]
+        {
+            false
+        }
+    }
+
+    fn detect_gpu_type() -> Option<crate::types::GpuType> {
+        #[cfg(target_os = "macos")]
+        {
+            Some(crate::types::GpuType::Metal)
+        }
+        #[cfg(all(target_os = "windows", feature = "mnn-cuda"))]
+        {
+            Some(crate::types::GpuType::CUDA)
+        }
+        #[cfg(not(any(target_os = "macos", all(target_os = "windows", feature = "mnn-cuda"))))]
+        {
+            None
+        }
+    }
+
+    fn detect_npu() -> bool {
+        false
+    }
+
+    fn detect_npu_type() -> Option<crate::types::NpuType> {
+        None
+    }
+
     fn check_fp16_support() -> bool {
+        #[cfg(target_arch = "aarch64")]
+        {
+            true
+        }
+        #[cfg(not(target_arch = "aarch64"))]
+        {
+            false
+        }
+    }
+
+    fn check_dotprod_support() -> bool {
         #[cfg(target_arch = "aarch64")]
         {
             true
@@ -218,8 +318,16 @@ impl LocalModelEngine {
         self.config.backend_type.clone()
     }
 
-    pub fn quantization(&self) -> MNNQuantization {
+    pub fn quantization(&self) -> crate::types::MNNQuantization {
         self.config.quantization.clone()
+    }
+
+    pub fn context_length(&self) -> usize {
+        self.config.context_length
+    }
+
+    pub fn thread_count(&self) -> usize {
+        self.config.thread_count
     }
 
     pub fn hardware_info(&self) -> &HardwareInfo {
@@ -230,8 +338,16 @@ impl LocalModelEngine {
         &self.tokenizer
     }
 
-    pub fn context_cache(&self) -> &ContextCache {
+    pub fn context_cache(&self) -> &KVContextCache {
         &self.context_cache
+    }
+
+    pub fn generation_config(&self) -> &GenerationConfig {
+        &self.generation_config
+    }
+
+    pub fn set_generation_config(&mut self, config: GenerationConfig) {
+        self.generation_config = config;
     }
 
     pub async fn stream_generate(
@@ -252,17 +368,41 @@ impl LocalModelEngine {
 
         Ok(stream::iter(words).boxed())
     }
+
+    pub async fn encode(&self, text: &str) -> Result<Vec<i32>> {
+        if let Some(ref llm) = self.llm {
+            llm.encode(text).await
+        } else {
+            self.tokenizer
+                .encode(text)
+                .map(|t| t.into_iter().map(|t| t as i32).collect())
+        }
+    }
+
+    pub async fn decode(&self, token: i32) -> Result<String> {
+        if let Some(ref llm) = self.llm {
+            llm.decode(token).await
+        } else {
+            self.tokenizer.decode(&[token as u32])
+        }
+    }
 }
 
 pub struct Tokenizer {
     vocab: Vec<String>,
+    bos_token_id: u32,
+    eos_token_id: u32,
 }
 
 impl Tokenizer {
     pub fn new(model_path: &PathBuf) -> Result<Self> {
         tracing::debug!("Loading tokenizer from {:?}", model_path);
 
-        Ok(Self { vocab: Vec::new() })
+        Ok(Self {
+            vocab: Vec::new(),
+            bos_token_id: 1,
+            eos_token_id: 2,
+        })
     }
 
     pub fn encode(&self, text: &str) -> Result<Vec<u32>> {
@@ -280,6 +420,14 @@ impl Tokenizer {
 
     pub fn vocab_size(&self) -> usize {
         self.vocab.len().max(32000)
+    }
+
+    pub fn bos_token_id(&self) -> u32 {
+        self.bos_token_id
+    }
+
+    pub fn eos_token_id(&self) -> u32 {
+        self.eos_token_id
     }
 }
 
@@ -343,13 +491,26 @@ mod tests {
     async fn engine_initialization() {
         let config = ModelConfig::default();
         let engine = LocalModelEngine::new(config).await.unwrap();
+        assert!(!engine.is_loaded().await);
+    }
+
+    #[tokio::test]
+    async fn engine_load_unload() {
+        let config = ModelConfig::default();
+        let mut engine = LocalModelEngine::new(config).await.unwrap();
+
+        engine.load().await.unwrap();
         assert!(engine.is_loaded().await);
+
+        engine.unload().await;
+        assert!(!engine.is_loaded().await);
     }
 
     #[tokio::test]
     async fn generate_response() {
         let config = ModelConfig::default();
-        let engine = LocalModelEngine::new(config).await.unwrap();
+        let mut engine = LocalModelEngine::new(config).await.unwrap();
+        engine.load().await.unwrap();
 
         let context = MCPContext::new("test-conv");
         let response = engine.generate("Hello", &context).await.unwrap();
@@ -359,7 +520,8 @@ mod tests {
     #[tokio::test]
     async fn generate_stream() {
         let config = ModelConfig::default();
-        let engine = LocalModelEngine::new(config).await.unwrap();
+        let mut engine = LocalModelEngine::new(config).await.unwrap();
+        engine.load().await.unwrap();
 
         let context = MCPContext::new("test-conv");
         let mut rx = engine.generate_stream("Hello", &context).await.unwrap();
@@ -369,16 +531,6 @@ mod tests {
             received.push_str(&word);
         }
         assert!(!received.is_empty());
-    }
-
-    #[tokio::test]
-    async fn unload_engine() {
-        let config = ModelConfig::default();
-        let engine = LocalModelEngine::new(config).await.unwrap();
-        assert!(engine.is_loaded().await);
-
-        engine.unload().await;
-        assert!(!engine.is_loaded().await);
     }
 
     #[test]
@@ -414,5 +566,12 @@ mod tests {
         let hw = LocalModelEngine::detect_hardware();
         assert!(hw.cpu_cores > 0);
         assert!(hw.total_memory > 0);
+    }
+
+    #[test]
+    fn generation_config_default() {
+        let config = GenerationConfig::default();
+        assert_eq!(config.max_new_tokens, 512);
+        assert!((config.temperature - 0.7).abs() < 0.001);
     }
 }

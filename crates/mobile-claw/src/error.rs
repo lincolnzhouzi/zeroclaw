@@ -53,6 +53,9 @@ pub enum Error {
     #[error("Not implemented: {0}")]
     NotImplemented(String),
 
+    #[error("FFI error: {0}")]
+    FFIError(String),
+
     #[error("Unknown error: {0}")]
     Unknown(String),
 }
@@ -62,5 +65,11 @@ pub type Result<T> = std::result::Result<T, Error>;
 impl From<anyhow::Error> for Error {
     fn from(err: anyhow::Error) -> Self {
         Error::Unknown(err.to_string())
+    }
+}
+
+impl From<std::ffi::NulError> for Error {
+    fn from(err: std::ffi::NulError) -> Self {
+        Error::FFIError(err.to_string())
     }
 }

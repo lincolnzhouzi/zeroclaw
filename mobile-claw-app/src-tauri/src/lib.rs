@@ -27,6 +27,8 @@ pub fn run() {
             commands::model::load_model,
             commands::model::unload_model,
             commands::model::get_available_models,
+            commands::model::get_hardware_info,
+            commands::model::download_model,
             commands::settings::get_settings,
             commands::settings::update_settings,
             commands::profile::get_user_profile,

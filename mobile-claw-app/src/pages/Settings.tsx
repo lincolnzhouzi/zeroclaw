@@ -3,6 +3,7 @@ import { useSettingsStore } from '@/stores'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
+import { Badge } from '@/components/ui/badge'
 import { 
   Moon, 
   Sun, 
@@ -11,15 +12,29 @@ import {
   Zap, 
   Cpu,
   Download,
-  Trash2
+  Trash2,
+  Loader2
 } from 'lucide-react'
 
 export function Settings() {
-  const { settings, getSettings, updateSettings, loading } = useSettingsStore()
+  const { 
+    settings, 
+    modelStatus, 
+    availableModels,
+    loading, 
+    getSettings, 
+    updateSettings,
+    getModelStatus,
+    getAvailableModels,
+    loadModel,
+    unloadModel
+  } = useSettingsStore()
   
   useEffect(() => {
     getSettings()
-  }, [getSettings])
+    getModelStatus()
+    getAvailableModels()
+  }, [getSettings, getModelStatus, getAvailableModels])
   
   const handleThemeChange = (theme: string) => {
     updateSettings({ theme })
@@ -146,13 +161,64 @@ export function Settings() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium">本地模型</p>
-              <p className="text-xs text-muted-foreground">未加载</p>
+              <p className="text-xs text-muted-foreground">
+                {modelStatus.loaded ? modelStatus.name : '未加载'}
+              </p>
             </div>
-            <Button variant="outline" size="sm">
-              <Download className="w-4 h-4 mr-1" />
-              加载
-            </Button>
+            {modelStatus.loaded ? (
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => unloadModel()}
+                disabled={loading}
+              >
+                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : '卸载'}
+              </Button>
+            ) : (
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => {
+                  if (availableModels.length > 0) {
+                    loadModel(availableModels[0].id)
+                  }
+                }}
+                disabled={loading || availableModels.length === 0}
+              >
+                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Download className="w-4 h-4 mr-1" />加载</>}
+              </Button>
+            )}
           </div>
+          
+          {modelStatus.loaded && (
+            <div className="flex items-center gap-2">
+              <Badge variant="outline">{modelStatus.backend}</Badge>
+              <Badge variant="secondary">{modelStatus.quantization}</Badge>
+            </div>
+          )}
+          
+          {availableModels.length > 0 && !modelStatus.loaded && (
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground">可用模型:</p>
+              {availableModels.map(model => (
+                <div key={model.id} className="flex items-center justify-between p-2 rounded border">
+                  <div>
+                    <p className="text-sm font-medium">{model.name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {model.size_mb}MB · {model.quantization}
+                    </p>
+                  </div>
+                  <Button 
+                    size="sm"
+                    onClick={() => loadModel(model.id)}
+                    disabled={loading || !model.downloaded}
+                  >
+                    {model.downloaded ? '加载' : '下载'}
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
           
           <div className="flex items-center justify-between">
             <span className="text-sm">功耗模式</span>

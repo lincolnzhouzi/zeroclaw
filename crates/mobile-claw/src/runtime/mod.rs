@@ -362,12 +362,16 @@ impl MobileClawRuntime {
                 name: engine.model_name().to_string(),
                 backend: format!("{:?}", engine.backend_type()),
                 quantization: format!("{:?}", engine.quantization()),
+                context_length: Some(engine.context_length()),
+                thread_count: Some(engine.thread_count()),
             },
             None => ModelStatus {
                 loaded: false,
                 name: "None".to_string(),
                 backend: "None".to_string(),
                 quantization: "None".to_string(),
+                context_length: None,
+                thread_count: None,
             },
         }
     }
@@ -381,6 +385,7 @@ impl MobileClawRuntime {
                 quantization: crate::types::MNNQuantization::INT8,
                 context_length: 4096,
                 downloaded: false,
+                model_type: "causal-lm".to_string(),
             },
             ModelInfo {
                 id: "qwen-7b".to_string(),
@@ -389,8 +394,23 @@ impl MobileClawRuntime {
                 quantization: crate::types::MNNQuantization::INT8,
                 context_length: 8192,
                 downloaded: false,
+                model_type: "causal-lm".to_string(),
             },
         ]
+    }
+
+    pub async fn get_hardware_info(&self) -> crate::types::HardwareInfo {
+        crate::types::HardwareInfo {
+            cpu_cores: num_cpus::get(),
+            total_memory: 8 * 1024 * 1024 * 1024,
+            gpu_available: false,
+            gpu_type: None,
+            gpu_memory: None,
+            npu_available: false,
+            npu_type: None,
+            supports_fp16: true,
+            supports_dotprod: cfg!(target_arch = "aarch64"),
+        }
     }
 
     pub async fn get_user_profile(&self, user_id: &str) -> Result<UserProfileInfo> {
@@ -457,6 +477,8 @@ pub struct ModelStatus {
     pub name: String,
     pub backend: String,
     pub quantization: String,
+    pub context_length: Option<usize>,
+    pub thread_count: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -467,6 +489,7 @@ pub struct ModelInfo {
     pub quantization: crate::types::MNNQuantization,
     pub context_length: usize,
     pub downloaded: bool,
+    pub model_type: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

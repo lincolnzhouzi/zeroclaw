@@ -1,3 +1,141 @@
+2026.3.20：
+## 运行测试和调试指南
+
+### 1. 开发模式运行（推荐用于调试）
+
+在本地终端（PowerShell 或 CMD）中执行：
+
+```powershell
+# 进入项目目录
+cd d:\workspace\zeroclaw\mobile-claw-app
+
+# 开发模式运行（热重载）
+npm run tauri dev
+```
+
+这将同时启动：
+- **前端开发服务器**：http://localhost:5173（Vite）
+- **Tauri 桌面应用窗口**：自动打开
+
+### 2. 不同平台运行方式
+
+#### Windows 桌面应用
+```powershell
+cd d:\workspace\zeroclaw\mobile-claw-app
+npm run tauri dev
+```
+
+#### Android 模拟器/设备
+```powershell
+# 前置条件：安装 Android SDK 和 NDK
+# 创建 Android 项目（首次）
+npm run tauri android init
+
+# 在 Android 设备/模拟器上运行
+npm run tauri android dev
+```
+
+#### iOS 模拟器/设备（需要 macOS）
+```bash
+# 前置条件：安装 Xcode
+# 创建 iOS 项目（首次）
+npm run tauri ios init
+
+# 在 iOS 设备/模拟器上运行
+npm run tauri ios dev
+```
+
+### 3. 调试方法
+
+#### 前端调试
+开发模式下，按 `F12` 或 `Ctrl+Shift+I` 打开 DevTools：
+- **Console**：查看日志和错误
+- **Network**：检查网络请求
+- **React DevTools**：检查组件状态
+
+#### Rust 后端调试
+在代码中添加日志：
+```rust
+use log::{info, debug, error};
+
+info!("Device connected: {}", device_id);
+debug!("Processing message: {:?}", message);
+error!("Failed to connect: {}", err);
+```
+
+运行时查看日志：
+```powershell
+# 设置日志级别
+$env:RUST_LOG="debug"
+npm run tauri dev
+```
+
+#### Tauri 命令调试
+在 [src-tauri/src/commands/](file:///d:/workspace/zeroclaw/mobile-claw-app/src-tauri/src/commands/) 中的命令函数添加日志：
+
+```rust
+#[tauri::command]
+pub async fn discover_devices(state: State<'_, AppState>) -> Result<Vec<DeviceInfo>, String> {
+    log::info!("Starting device discovery...");
+    let runtime = state.runtime.read().await;
+    let devices = runtime.discover_devices().await.map_err(|e| {
+        log::error!("Discovery failed: {}", e);
+        e.to_string()
+    })?;
+    log::info!("Found {} devices", devices.len());
+    Ok(devices)
+}
+```
+
+### 4. 构建生产版本
+
+```powershell
+# 构建桌面版本
+npm run tauri build
+
+# 构建产物位置：
+# Windows: src-tauri/target/release/bundle/msi/
+# macOS: src-tauri/target/release/bundle/dmg/
+
+# 构建 Android APK
+npm run tauri android build
+
+# 构建 iOS IPA
+npm run tauri ios build
+```
+
+### 5. 运行单元测试
+
+```powershell
+# 测试 mobile-claw 核心库
+cd d:\workspace\zeroclaw
+cargo test -p mobile-claw
+
+# 测试 Tauri 应用
+cargo test -p mobile-claw-app
+```
+
+### 6. 常见问题排查
+
+| 问题 | 解决方案 |
+|------|----------|
+| 端口 5173 被占用 | 修改 `vite.config.ts` 中的端口 |
+| 编译缓存问题 | 运行 `cargo clean` 后重新编译 |
+| 前端依赖问题 | 删除 `node_modules` 后重新 `npm install` |
+| Android SDK 未找到 | 设置 `ANDROID_HOME` 环境变量 |
+
+### 7. 开发工作流建议
+
+```
+1. npm run tauri dev     → 启动开发服务器
+2. 修改代码              → 自动热重载
+3. 查看 DevTools         → 调试前端
+4. 查看终端日志          → 调试后端
+5. 测试功能              → 验证修改
+6. Ctrl+C 停止           → 结束开发
+```
+
+需要我帮您解决任何具体的运行或调试问题吗？
 2026.3.18：
 
 2026.3.18：

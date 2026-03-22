@@ -4,12 +4,12 @@ import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { Slider } from '@/components/ui/slider'
 import { Badge } from '@/components/ui/badge'
-import { 
-  Lightbulb, 
-  Wind, 
-  Tv, 
-  Camera, 
-  Lock, 
+import {
+  Lightbulb,
+  Wind,
+  Tv,
+  Camera,
+  Lock,
   Blinds,
   Thermometer,
   Speaker,
@@ -59,14 +59,14 @@ const deviceTypeNames: Record<DeviceType, string> = {
 
 export function DeviceCard({ device, onConnect, onDisconnect, onControl }: DeviceCardProps) {
   const isOnline = device.state.online
-  
+
   const handlePowerToggle = () => {
     const action = device.state.power ? 'turn_off' : 'turn_on'
     onControl(action, {})
   }
-  
+
   const ProtocolIcon = device.protocol === 'BLE' ? Bluetooth : Wifi
-  
+
   return (
     <Card className={`${isOnline ? 'border-green-500/50' : 'border-border'}`}>
       <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -81,7 +81,7 @@ export function DeviceCard({ device, onConnect, onDisconnect, onControl }: Devic
           <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500' : 'bg-gray-400'}`} />
         </div>
       </CardHeader>
-      
+
       <CardContent>
         <div className="space-y-3">
           <div className="flex items-center justify-between">
@@ -93,7 +93,7 @@ export function DeviceCard({ device, onConnect, onDisconnect, onControl }: Devic
               />
             )}
           </div>
-          
+
           {isOnline && device.device_type === 'Light' && device.state.brightness !== undefined && (
             <div className="space-y-2">
               <div className="flex items-center justify-between text-sm">
@@ -101,7 +101,7 @@ export function DeviceCard({ device, onConnect, onDisconnect, onControl }: Devic
                 <span>{device.state.brightness}%</span>
               </div>
               <Slider
-                value={[device.state.brightness]}
+                value={String(device.state.brightness)}
                 max={100}
                 onInput={(e) => {
                   const value = parseInt(e.currentTarget.value)
@@ -110,7 +110,7 @@ export function DeviceCard({ device, onConnect, onDisconnect, onControl }: Devic
               />
             </div>
           )}
-          
+
           {isOnline && device.device_type === 'AirConditioner' && device.state.temperature !== undefined && (
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">温度</span>
@@ -133,7 +133,7 @@ export function DeviceCard({ device, onConnect, onDisconnect, onControl }: Devic
               </div>
             </div>
           )}
-          
+
           {isOnline && device.device_type === 'Television' && device.state.volume !== undefined && (
             <div className="space-y-2">
               <div className="flex items-center justify-between text-sm">
@@ -141,7 +141,7 @@ export function DeviceCard({ device, onConnect, onDisconnect, onControl }: Devic
                 <span>{device.state.volume}%</span>
               </div>
               <Slider
-                value={[device.state.volume]}
+                value={String(device.state.volume)}
                 max={100}
                 onInput={(e) => {
                   const value = parseInt(e.currentTarget.value)
@@ -150,7 +150,7 @@ export function DeviceCard({ device, onConnect, onDisconnect, onControl }: Devic
               />
             </div>
           )}
-          
+
           <div className="flex gap-2 pt-2">
             {isOnline ? (
               <Button variant="outline" size="sm" className="flex-1" onClick={onDisconnect}>

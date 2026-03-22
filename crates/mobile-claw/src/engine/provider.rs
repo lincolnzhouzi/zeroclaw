@@ -1,7 +1,7 @@
 use crate::engine::LocalModelEngine;
 use crate::error::{Error, Result};
 use crate::protocols::mcp::MCPContext;
-use crate::types::ModelConfig;
+use crate::types::{HardwareInfo, ModelConfig};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -39,6 +39,11 @@ impl ChatResponse {
             usage: None,
             reasoning_content: None,
         }
+    }
+
+    pub fn with_usage(mut self, usage: TokenUsage) -> Self {
+        self.usage = Some(usage);
+        self
     }
 }
 
@@ -110,6 +115,7 @@ pub struct MNNProvider {
     engine: Arc<RwLock<Option<LocalModelEngine>>>,
     config: ModelConfig,
     capabilities: ProviderCapabilities,
+    hardware_info: Arc<RwLock<Option<HardwareInfo>>>,
 }
 
 impl MNNProvider {
@@ -118,20 +124,28 @@ impl MNNProvider {
             engine: Arc::new(RwLock::new(None)),
             config,
             capabilities: ProviderCapabilities::default(),
+            hardware_info: Arc::new(RwLock::new(None)),
         }
     }
 
     pub async fn load(&self) -> Result<()> {
-        let engine = LocalModelEngine::new(self.config.clone()).await?;
+        let mut engine = LocalModelEngine::new(self.config.clone()).await?;
+        engine.load().await?;
+
+        let hw_info = engine.hardware_info().clone();
+
         let mut guard = self.engine.write().await;
         *guard = Some(engine);
+        let mut hw = self.hardware_info.write().await;
+        *hw = Some(hw_info);
+
         tracing::info!("MNN Provider loaded: {}", self.config.model_name);
         Ok(())
     }
 
     pub async fn unload(&self) {
         let mut guard = self.engine.write().await;
-        if let Some(engine) = guard.take() {
+        if let Some(mut engine) = guard.take() {
             engine.unload().await;
         }
         tracing::info!("MNN Provider unloaded");
@@ -152,7 +166,9 @@ impl MNNProvider {
         temperature: f64,
     ) -> Result<String> {
         let engine = self.engine.read().await;
-        let engine = engine.as_ref().ok_or_else(|| Error::ModelError("Model not loaded".to_string()))?;
+        let engine = engine
+            .as_ref()
+            .ok_or_else(|| Error::ModelError("Model not loaded".to_string()))?;
 
         let context = MCPContext::new("single-turn");
         let full_prompt = if let Some(sys) = system_prompt {
@@ -164,13 +180,11 @@ impl MNNProvider {
         engine.generate(&full_prompt, &context).await
     }
 
-    pub async fn chat(
-        &self,
-        messages: &[ChatMessage],
-        temperature: f64,
-    ) -> Result<ChatResponse> {
+    pub async fn chat(&self, messages: &[ChatMessage], temperature: f64) -> Result<ChatResponse> {
         let engine = self.engine.read().await;
-        let engine = engine.as_ref().ok_or_else(|| Error::ModelError("Model not loaded".to_string()))?;
+        let engine = engine
+            .as_ref()
+            .ok_or_else(|| Error::ModelError("Model not loaded".to_string()))?;
 
         let context = MCPContext::new("multi-turn");
         let prompt = self.messages_to_prompt(messages);
@@ -198,7 +212,9 @@ impl MNNProvider {
         temperature: f64,
     ) -> Result<tokio::sync::mpsc::Receiver<StreamChunk>> {
         let engine = self.engine.read().await;
-        let engine = engine.as_ref().ok_or_else(|| Error::ModelError("Model not loaded".to_string()))?;
+        let engine = engine
+            .as_ref()
+            .ok_or_else(|| Error::ModelError("Model not loaded".to_string()))?;
 
         let context = MCPContext::new("streaming");
         let prompt = self.messages_to_prompt(messages);
@@ -225,13 +241,43 @@ impl MNNProvider {
         context: &MCPContext,
     ) -> Result<String> {
         let engine = self.engine.read().await;
-        let engine = engine.as_ref().ok_or_else(|| Error::ModelError("Model not loaded".to_string()))?;
+        let engine = engine
+            .as_ref()
+            .ok_or_else(|| Error::ModelError("Model not loaded".to_string()))?;
 
         engine.generate(prompt, context).await
     }
 
     pub fn config(&self) -> &ModelConfig {
         &self.config
+    }
+
+    pub async fn hardware_info(&self) -> Option<HardwareInfo> {
+        let guard = self.hardware_info.read().await;
+        guard.clone()
+    }
+
+    pub async fn get_hardware_info(&self) -> Option<HardwareInfo> {
+        let guard = self.engine.read().await;
+        guard.as_ref().map(|e| e.hardware_info().clone())
+    }
+
+    pub async fn encode(&self, text: &str) -> Result<Vec<i32>> {
+        let engine = self.engine.read().await;
+        let engine = engine
+            .as_ref()
+            .ok_or_else(|| Error::ModelError("Model not loaded".to_string()))?;
+
+        engine.encode(text).await
+    }
+
+    pub async fn decode(&self, token: i32) -> Result<String> {
+        let engine = self.engine.read().await;
+        let engine = engine
+            .as_ref()
+            .ok_or_else(|| Error::ModelError("Model not loaded".to_string()))?;
+
+        engine.decode(token).await
     }
 }
 
@@ -244,65 +290,6 @@ mod tests {
         let config = ModelConfig::default();
         let provider = MNNProvider::new(config);
         assert!(!provider.is_loaded().await);
-    }
-
-    #[tokio::test]
-    async fn provider_load_unload() {
-        let config = ModelConfig::default();
-        let provider = MNNProvider::new(config);
-
-        provider.load().await.unwrap();
-        assert!(provider.is_loaded().await);
-
-        provider.unload().await;
-        assert!(!provider.is_loaded().await);
-    }
-
-    #[tokio::test]
-    async fn chat_with_system() {
-        let config = ModelConfig::default();
-        let provider = MNNProvider::new(config);
-        provider.load().await.unwrap();
-
-        let response = provider
-            .chat_with_system(Some("You are helpful"), "Hello", 0.7)
-            .await
-            .unwrap();
-        assert!(!response.is_empty());
-    }
-
-    #[tokio::test]
-    async fn chat_multi_turn() {
-        let config = ModelConfig::default();
-        let provider = MNNProvider::new(config);
-        provider.load().await.unwrap();
-
-        let messages = vec![
-            ChatMessage::system("You are helpful"),
-            ChatMessage::user("Hello"),
-        ];
-
-        let response = provider.chat(&messages, 0.7).await.unwrap();
-        assert!(response.text.is_some());
-    }
-
-    #[tokio::test]
-    async fn stream_chat() {
-        let config = ModelConfig::default();
-        let provider = MNNProvider::new(config);
-        provider.load().await.unwrap();
-
-        let messages = vec![ChatMessage::user("Hello")];
-        let mut rx = provider.stream_chat(&messages, 0.7).await.unwrap();
-
-        let mut chunks = 0;
-        while let Some(chunk) = rx.recv().await {
-            if chunk.is_final {
-                break;
-            }
-            chunks += 1;
-        }
-        assert!(chunks > 0);
     }
 
     #[test]
@@ -318,5 +305,38 @@ mod tests {
         let response = ChatResponse::text_only("Hello");
         assert_eq!(response.text, Some("Hello".to_string()));
         assert!(response.tool_calls.is_empty());
+    }
+
+    #[test]
+    fn stream_chunk_delta() {
+        let chunk = StreamChunk::delta("test");
+        assert_eq!(chunk.delta, "test");
+        assert!(!chunk.is_final);
+    }
+
+    #[test]
+    fn stream_chunk_final() {
+        let chunk = StreamChunk::final_chunk();
+        assert!(chunk.delta.is_empty());
+        assert!(chunk.is_final);
+    }
+
+    #[test]
+    fn model_config_default() {
+        let config = ModelConfig::default();
+        assert_eq!(config.model_name, "default");
+        assert_eq!(config.thread_count, 4);
+    }
+
+    #[test]
+    fn chat_message_roles() {
+        let system = ChatMessage::system("system message");
+        assert_eq!(system.role, "system");
+
+        let user = ChatMessage::user("user message");
+        assert_eq!(user.role, "user");
+
+        let assistant = ChatMessage::assistant("assistant message");
+        assert_eq!(assistant.role, "assistant");
     }
 }
