@@ -48,21 +48,19 @@ export function BackendSelector() {
             return (
               <div
                 key={backend.id}
-                className={`flex items-center justify-between p-3 rounded-lg border ${
-                  isActive
+                className={`flex items-center justify-between p-3 rounded-lg border ${isActive
                     ? 'border-primary bg-primary/5'
                     : backend.available
-                    ? 'border-border'
-                    : 'border-border opacity-50'
-                }`}
+                      ? 'border-border'
+                      : 'border-border opacity-50'
+                  }`}
               >
                 <div className="flex items-center gap-3">
                   <div
-                    className={`p-2 rounded-md ${
-                      isActive
+                    className={`p-2 rounded-md ${isActive
                         ? 'bg-primary text-primary-foreground'
                         : 'bg-muted'
-                    }`}
+                      }`}
                   >
                     <Icon className="w-4 h-4" />
                   </div>

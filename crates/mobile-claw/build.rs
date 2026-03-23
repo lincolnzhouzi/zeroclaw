@@ -4,6 +4,8 @@ use std::path::PathBuf;
 fn main() {
     println!("cargo:rerun-if-env-changed=MNN_LIB_DIR");
     println!("cargo:rerun-if-env-changed=MNN_INCLUDE_DIR");
+    println!("cargo:rustc-check-cfg=cfg(mnn_linked)");
+    println!("cargo:rustc-check-cfg=cfg(mnn_llm_linked)");
 
     if cfg!(feature = "mnn") {
         let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
@@ -13,6 +15,18 @@ fn main() {
         println!("cargo:rerun-if-changed=mnn-wrapper/mnn_c_api.cpp");
 
         let mut found_mnn = false;
+        let mut found_llm = false;
+        let mut found_wrapper = false;
+
+        let mnn_source_dir = PathBuf::from(&manifest_dir)
+            .parent()
+            .and_then(|p| p.parent())
+            .and_then(|p| p.parent())
+            .map(|p| p.join("MNN"))
+            .unwrap_or_default();
+
+        let mnn_llm_build_dir = mnn_source_dir.join("build_llm").join("Release");
+        let wrapper_build_dir = mnn_wrapper_dir.join("build").join("Release");
 
         if let Ok(mnn_lib_dir) = env::var("MNN_LIB_DIR") {
             let lib_path = PathBuf::from(&mnn_lib_dir);
@@ -25,9 +39,7 @@ fn main() {
 
         if !found_mnn {
             let search_paths = vec![
-                mnn_wrapper_dir.join("build").join("Release"),
-                mnn_wrapper_dir.join("build"),
-                PathBuf::from(&manifest_dir).join("lib"),
+                mnn_llm_build_dir.clone(),
                 PathBuf::from(&manifest_dir)
                     .parent()
                     .and_then(|p| p.parent())
@@ -40,6 +52,15 @@ fn main() {
                     .and_then(|p| p.parent())
                     .map(|p| p.join("MNN").join("build"))
                     .unwrap_or_default(),
+                PathBuf::from(
+                    "D:\\mnn_lib\\mnn_3.4.1_windows_x64_cpu_opencl\\lib\\x64\\Release\\Dynamic\\MD",
+                ),
+                PathBuf::from(
+                    "D:\\mnn_lib\\mnn_3.4.1_windows_x64_cpu_opencl\\lib\\x64\\Release\\Dynamic\\MT",
+                ),
+                wrapper_build_dir.clone(),
+                mnn_wrapper_dir.join("build"),
+                PathBuf::from(&manifest_dir).join("lib"),
             ];
 
             for path in search_paths {
@@ -53,7 +74,58 @@ fn main() {
                         println!("cargo:rustc-link-search=native={}", path.display());
                         println!("cargo:rustc-link-lib=dylib=MNN");
                         found_mnn = true;
+
+                        let llm_header = mnn_source_dir
+                            .join("transformers")
+                            .join("llm")
+                            .join("engine")
+                            .join("include")
+                            .join("llm")
+                            .join("llm.hpp");
+                        if llm_header.exists() {
+                            found_llm = true;
+                        }
                         break;
+                    }
+                }
+            }
+        }
+
+        if found_llm && cfg!(feature = "mnn-llm") {
+            if wrapper_build_dir.exists() {
+                println!(
+                    "cargo:rustc-link-search=native={}",
+                    wrapper_build_dir.display()
+                );
+
+                let has_wrapper = wrapper_build_dir.join("mnn_llm_wrapper.dll").exists()
+                    || wrapper_build_dir.join("mnn_llm_wrapper.lib").exists()
+                    || wrapper_build_dir.join("libmnn_llm_wrapper.so").exists()
+                    || wrapper_build_dir.join("libmnn_llm_wrapper.dylib").exists();
+
+                if has_wrapper {
+                    println!("cargo:rustc-link-lib=dylib=mnn_llm_wrapper");
+                    found_wrapper = true;
+                }
+            }
+
+            if !found_wrapper {
+                let wrapper_search_paths = vec![
+                    mnn_wrapper_dir.join("build"),
+                    PathBuf::from(&manifest_dir).join("lib"),
+                ];
+
+                for path in wrapper_search_paths {
+                    if path.exists() {
+                        let has_wrapper = path.join("mnn_llm_wrapper.dll").exists()
+                            || path.join("mnn_llm_wrapper.lib").exists();
+
+                        if has_wrapper {
+                            println!("cargo:rustc-link-search=native={}", path.display());
+                            println!("cargo:rustc-link-lib=dylib=mnn_llm_wrapper");
+                            found_wrapper = true;
+                            break;
+                        }
                     }
                 }
             }
@@ -61,7 +133,13 @@ fn main() {
 
         if found_mnn {
             println!("cargo:rustc-cfg=mnn_linked");
-        } else {
+        }
+
+        if found_llm && cfg!(feature = "mnn-llm") && found_wrapper {
+            println!("cargo:rustc-cfg=mnn_llm_linked");
+        }
+
+        if !found_mnn {
             println!("cargo:warning=========================================");
             println!("cargo:warning=MNN library not found!");
             println!("cargo:warning=========================================");
@@ -77,6 +155,22 @@ fn main() {
             println!("cargo:warning=");
             println!("cargo:warning=Pre-built MNN libraries can be downloaded from:");
             println!("cargo:warning=https://github.com/alibaba/MNN/releases");
+            println!("cargo:warning=========================================");
+        }
+
+        if cfg!(feature = "mnn-llm") && found_llm && !found_wrapper {
+            println!("cargo:warning=========================================");
+            println!("cargo:warning=MNN LLM wrapper library not found!");
+            println!("cargo:warning=========================================");
+            println!("cargo:warning=To build with MNN LLM support, you need to:");
+            println!("cargo:warning=1. Build MNN with LLM support first:");
+            println!("cargo:warning=   cd MNN");
+            println!("cargo:warning=   ./build_llm.bat");
+            println!("cargo:warning=2. Build the LLM wrapper:");
+            println!("cargo:warning=   cd crates/mobile-claw/mnn-wrapper");
+            println!("cargo:warning=   mkdir build && cd build");
+            println!("cargo:warning=   cmake .. -DMNN_DIR=../../../MNN -DMNN_BUILD_DIR=../../../MNN/build_llm");
+            println!("cargo:warning=   cmake --build . --config Release");
             println!("cargo:warning=========================================");
         }
 

@@ -1,3 +1,37 @@
+2026.3.23:
+## ✅ MNN LLM 编译成功！
+### 编译结果
+产物 路径 大小 MNN.dll D:\workspace\MNN\build_llm\Release\MNN.dll 3.7 MB MNN.lib D:\workspace\MNN\build_llm\Release\MNN.lib 471 KB llm_demo.exe D:\workspace\MNN\build_llm\Release\llm_demo.exe 74 KB quantize_llm.exe D:\workspace\MNN\build_llm\Release\quantize_llm.exe 244 KB
+
+### LLM 工具
+编译生成了以下 LLM 相关工具：
+
+- llm_demo.exe - LLM 演示程序
+- llm_bench.exe - LLM 性能测试
+- tokenizer_demo.exe - Tokenizer 演示
+- quantize_llm.exe - LLM 模型量化工具
+- embedding_demo.exe - Embedding 演示
+### zeroclaw 项目配置
+已更新 build.rs 优先搜索新编译的 MNN LLM 库：
+
+- 搜索路径: D:\workspace\MNN\build_llm\Release
+- LLM 头文件检测: D:\workspace\MNN\transformers\llm\engine\include\llm\llm.hpp
+### 使用方式
+```
+# 编译 zeroclaw 项目（基础 MNN 功能）
+cargo build --features mnn
+
+# 编译 zeroclaw 项目（完整 LLM 功能）
+cargo build --features mnn-llm
+
+# 运行测试
+cargo test --features mnn
+```
+### 下一步
+1. 将 MNN.dll 复制到应用程序目录
+2. 准备 LLM 模型文件（如 Qwen）
+3. 使用 quantize_llm.exe 量化模型
+4. 测试 LLM 推理功能
 2026.3.20：
 ## 运行测试和调试指南
 

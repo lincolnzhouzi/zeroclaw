@@ -95,8 +95,7 @@ impl MNNTensor {
 }
 
 impl Drop for MNNTensor {
-    fn drop(&mut self) {
-    }
+    fn drop(&mut self) {}
 }
 
 pub struct TensorBuilder {

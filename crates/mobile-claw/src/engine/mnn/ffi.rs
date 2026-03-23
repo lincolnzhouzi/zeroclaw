@@ -266,7 +266,13 @@ extern "C" {
         value: *const c_char,
     ) -> c_int;
     pub fn Llm_reset(llm: *mut MNNLlmOpaque);
-    pub fn Llm_set_tokenizer(llm: *mut MNNLlmOpaque, tokenizer_path: *const c_char) -> c_int;
+    pub fn Llm_getLastError(llm: *mut MNNLlmOpaque) -> *const c_char;
+    pub fn Llm_getGeneratedText(llm: *mut MNNLlmOpaque) -> *const c_char;
+    pub fn Llm_generate(
+        llm: *mut MNNLlmOpaque,
+        prompt: *const c_char,
+        max_new_tokens: c_int,
+    ) -> c_int;
 }
 
 pub type MNNInterpreter = MNNInterpreterOpaque;

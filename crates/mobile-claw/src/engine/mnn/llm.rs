@@ -25,7 +25,7 @@ impl MNNLlm {
         }
     }
 
-    #[cfg(all(feature = "mnn", mnn_linked))]
+    #[cfg(all(feature = "mnn-llm", mnn_llm_linked))]
     pub async fn load(&self) -> Result<()> {
         let config_path = self.model_path.join("llm_config.json");
         let config_path_str = config_path.to_string_lossy().into_owned();
@@ -53,7 +53,7 @@ impl MNNLlm {
         Ok(())
     }
 
-    #[cfg(not(all(feature = "mnn", mnn_linked)))]
+    #[cfg(not(all(feature = "mnn-llm", mnn_llm_linked)))]
     pub async fn load(&self) -> Result<()> {
         let mut loaded = self.loaded.write().await;
         *loaded = true;
@@ -61,7 +61,7 @@ impl MNNLlm {
         Ok(())
     }
 
-    #[cfg(all(feature = "mnn", mnn_linked))]
+    #[cfg(all(feature = "mnn-llm", mnn_llm_linked))]
     pub async fn unload(&self) {
         let mut inner = self.inner.write().await;
         if let Some(llm) = inner.take() {
@@ -74,7 +74,7 @@ impl MNNLlm {
         tracing::info!("MNN LLM unloaded");
     }
 
-    #[cfg(not(all(feature = "mnn", mnn_linked)))]
+    #[cfg(not(all(feature = "mnn-llm", mnn_llm_linked)))]
     pub async fn unload(&self) {
         let mut loaded = self.loaded.write().await;
         *loaded = false;
@@ -85,7 +85,7 @@ impl MNNLlm {
         *self.loaded.read().await
     }
 
-    #[cfg(all(feature = "mnn", mnn_linked))]
+    #[cfg(all(feature = "mnn-llm", mnn_llm_linked))]
     pub async fn encode(&self, text: &str) -> Result<Vec<i32>> {
         let inner = self.inner.read().await;
         let llm = inner.ok_or_else(|| Error::ModelError("LLM not loaded".into()))?;
@@ -105,13 +105,13 @@ impl MNNLlm {
         Ok(tokens)
     }
 
-    #[cfg(not(all(feature = "mnn", mnn_linked)))]
+    #[cfg(not(all(feature = "mnn-llm", mnn_llm_linked)))]
     pub async fn encode(&self, text: &str) -> Result<Vec<i32>> {
         let tokens: Vec<i32> = text.chars().map(|c| c as i32).collect();
         Ok(tokens)
     }
 
-    #[cfg(all(feature = "mnn", mnn_linked))]
+    #[cfg(all(feature = "mnn-llm", mnn_llm_linked))]
     pub async fn decode(&self, token: i32) -> Result<String> {
         let inner = self.inner.read().await;
         let llm = inner.ok_or_else(|| Error::ModelError("LLM not loaded".into()))?;
@@ -130,7 +130,7 @@ impl MNNLlm {
             .map_err(|e| Error::ModelError(format!("UTF-8 decode error: {}", e)))
     }
 
-    #[cfg(not(all(feature = "mnn", mnn_linked)))]
+    #[cfg(not(all(feature = "mnn-llm", mnn_llm_linked)))]
     pub async fn decode(&self, token: i32) -> Result<String> {
         if token > 0 && token < 0x10FFFF {
             Ok(String::from(char::from_u32(token as u32).unwrap_or('?')))
@@ -139,7 +139,7 @@ impl MNNLlm {
         }
     }
 
-    #[cfg(all(feature = "mnn", mnn_linked))]
+    #[cfg(all(feature = "mnn-llm", mnn_llm_linked))]
     pub async fn generate_stream(&self, prompt: &str) -> Result<mpsc::Receiver<String>> {
         let inner = self.inner.read().await;
         let llm = *inner
@@ -182,7 +182,7 @@ impl MNNLlm {
         Ok(rx)
     }
 
-    #[cfg(not(all(feature = "mnn", mnn_linked)))]
+    #[cfg(not(all(feature = "mnn-llm", mnn_llm_linked)))]
     pub async fn generate_stream(&self, prompt: &str) -> Result<mpsc::Receiver<String>> {
         let (tx, rx) = mpsc::channel(64);
 
@@ -192,7 +192,7 @@ impl MNNLlm {
         Ok(rx)
     }
 
-    #[cfg(all(feature = "mnn", mnn_linked))]
+    #[cfg(all(feature = "mnn-llm", mnn_llm_linked))]
     pub async fn set_config(&self, key: &str, value: &str) -> Result<()> {
         let inner = self.inner.read().await;
         let llm = inner.ok_or_else(|| Error::ModelError("LLM not loaded".into()))?;
@@ -212,12 +212,12 @@ impl MNNLlm {
         Ok(())
     }
 
-    #[cfg(not(all(feature = "mnn", mnn_linked)))]
+    #[cfg(not(all(feature = "mnn-llm", mnn_llm_linked)))]
     pub async fn set_config(&self, _key: &str, _value: &str) -> Result<()> {
         Ok(())
     }
 
-    #[cfg(all(feature = "mnn", mnn_linked))]
+    #[cfg(all(feature = "mnn-llm", mnn_llm_linked))]
     pub async fn reset(&self) {
         let inner = self.inner.read().await;
         if let Some(llm) = inner.as_ref() {
@@ -227,7 +227,7 @@ impl MNNLlm {
         }
     }
 
-    #[cfg(not(all(feature = "mnn", mnn_linked)))]
+    #[cfg(not(all(feature = "mnn-llm", mnn_llm_linked)))]
     pub async fn reset(&self) {
         tracing::info!("MNN LLM stub reset");
     }
